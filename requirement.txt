@@ -1,0 +1,6 @@
+pillow
+pycrypto
+numpy
+aiohttp
+aiodns
+tqdm
