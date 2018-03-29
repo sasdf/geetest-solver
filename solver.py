@@ -2,19 +2,13 @@ import numpy as np
 import random
 
 
-async def solve(challenge):
-    """
-    Generate challenge answer.
-    """
-    d = distance(await challenge.bg, await challenge.fullbg)
-    return motion(d)
-
-def distance(a, b):
+async def distance(challenge):
     """
     Find x coordinate of answer.
     """
 
-    diff = np.abs(a - b) > 50
+    diff = (await challenge.bg - await challenge.fullbg)
+    diff = np.abs(diff) > 50
     diff = np.max(np.max(diff, 2), 0)
     d = next(i for i, e in enumerate(diff)if e) - 6
     return d

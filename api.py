@@ -32,15 +32,15 @@ imageOffset = [[
 
 
 class Challenge(object):
-    def __init__(self, gt, session):
-        self.gt = gt
-        self.session = session
+    def __init__(self, context):
+        self.context = context
 
     async def load(self):
-        async with self.session.get(URLs['get'], params={'gt': self.gt}, headers=headers) as req:
-            if req.status != 200:
-                raise ValueError('Response status code %d not acceptable' % req.status)
-            res = await req.text()
+        async with self.context.concurrent:
+            async with self.context.session.get(URLs['get'], params={'gt': self.context.gt}, headers=headers) as req:
+                if req.status != 200:
+                    raise ValueError('Response status code %d not acceptable' % req.status)
+                res = await req.text()
         challenge = re.search(r'Geetest\((\{[^\}]*?\})', res)
         if challenge is None:
             raise ValueError('Unknown response from server')
@@ -50,10 +50,11 @@ class Challenge(object):
         return self
 
     async def getImage(self, url):
-        async with self.session.get(url, headers=headers) as req:
-            if req.status != 200:
-                raise ValueError('Response status code %d not acceptable' % req.status)
-            raw = io.BytesIO(await req.read())
+        async with self.context.concurrent:
+            async with self.context.session.get(url, headers=headers) as req:
+                if req.status != 200:
+                    raise ValueError('Response status code %d not acceptable' % req.status)
+                raw = io.BytesIO(await req.read())
         raw = np.asarray(Image.open(raw))
         img = np.empty((116, 260, 3), dtype=np.uint8)
         for y, row in enumerate(imageOffset):
@@ -85,9 +86,10 @@ class Challenge(object):
         remaining = passtime + 0.5 - time.time() + self.timestamp
         if remaining > 0:
             await asyncio.sleep(remaining)
-        async with self.session.get(URLs['validate'], params=params, headers=headers) as req:
-            if req.status != 200:
-                raise ValueError('Response status code %d not acceptable' % req.status)
-            res = await req.text()
+        async with self.context.concurrent:
+            async with self.context.session.get(URLs['validate'], params=params, headers=headers) as req:
+                if req.status != 200:
+                    raise ValueError('Response status code %d not acceptable' % req.status)
+                res = await req.text()
         res = json.loads(res[len(params['callback'])+1:-1])
         return res

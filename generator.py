@@ -5,15 +5,16 @@ import threading
 import queue
 
 from api import Challenge
-from solver import solve
+import solver
 
 
 class CaptchaGenerator(object):
-    def __init__(self, qlimit, climit, interval, gt):
+    def __init__(self, qlimit, plimit, climit, interval, gt):
         """
         A generator that will produce valid captcha.
         
-        qlimit: Maximum number of buffered captcha.
+        qlimit: Maximum number of buffered solved captcha.
+        plimit: Maximum number of pending unsolved captcha.
         climit: Maximum concurrent connection.
         interval: Minimum time interval between two concurrent connection.
         gt: geetest key.
@@ -21,6 +22,7 @@ class CaptchaGenerator(object):
 
         self.gt = gt
         self.climit = climit
+        self.plimit = plimit
         self.interval = interval
         self.output = queue.Queue(qlimit)
         self.lock = threading.Lock()
@@ -28,6 +30,7 @@ class CaptchaGenerator(object):
         self.closed = False
         self.thread = threading.Thread(target=self.worker)
         self.thread.start()
+        self.history = {}
 
     def __iter__(self):
         return self
@@ -44,16 +47,25 @@ class CaptchaGenerator(object):
         self.loop.stop()
         self.loop.close()
 
-    async def get(self):
-        c = await Challenge(self.gt, self.session).load()
-        res = await c.validate(await solve(c))
-        self.concurrent.release()
+    async def gen(self):
+        c = await Challenge(self).load()
+        distance = await solver.distance(c)
+        if distance in self.history:
+            answer = self.history[distance]
+        else:
+            answer = solver.motion(distance)
+        res = await c.validate(answer)
+        self.pending.release()
         if res['message'] == 'success':
+            self.history[distance] = answer
             with self.lock:
                 self._successRate *= 0.99
                 self._successRate += 0.01
+            res['challenge'] = c.info['challenge']
             self.output.put(res)
         else:
+            if distance in self.history:
+                del self.history[distance]
             with self.lock:
                 self._successRate *= 0.99
 
@@ -66,18 +78,19 @@ class CaptchaGenerator(object):
         climit: Maximum concurrent connection.
         interval: Minimum time interval between two concurrent connection.
         """
-        self.concurrent = asyncio.Semaphore(self.climit)
         last = 0
+        self.pending = asyncio.Semaphore(self.plimit)
+        self.concurrent = asyncio.Semaphore(self.climit)
         async with aiohttp.ClientSession() as session:
             self.session = session
             #  for i in range(10):
             while not self.closed:
-                await self.concurrent.acquire()
+                await self.pending.acquire()
                 now = time.time() * 1000
                 if now - last < self.interval:
                     await asyncio.sleep((self.interval - now + last) / 1000)
                 last = now
-                asyncio.ensure_future(self.get())
+                asyncio.ensure_future(self.gen())
 
             for i in range(self.climit):
                 await self.concurrent.acquire()
